@@ -64,6 +64,7 @@ MumxPack extract --only-mum
 MumxPack extract --only-update
 MumxPack extract --only-container
 MumxPack extract --name "exact-name.mum"
+MumxPack extract --jobs 8
 MumxPack mum
 MumxPack pack
 MumxPack info

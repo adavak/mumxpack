@@ -6,6 +6,8 @@ Changed MUM XML is appended as a new entry tree; existing trees/offsets are
 left untouched, so shared refs in the container stay valid.
 """
 import argparse
+import multiprocessing
+import os
 import hashlib
 import os
 import shutil
@@ -15,6 +17,7 @@ import sys
 import tempfile
 import xml.parsers.expat as expat
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -23,7 +26,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 
 def leb(v):
@@ -292,7 +295,24 @@ class Builder:
         return bytes(out)
 
 
-def extract_all(m, out_dir, mum_only=False, name_filter=None):
+_WORKER_M = None
+
+
+def _worker_init(container_path):
+    global _WORKER_M
+    _WORKER_M = Mumx(container_path)
+
+
+def _worker_write(item):
+    name, text, out_dir = item
+    data = _WORKER_M.extract(name)
+    path = Path(out_dir) / text
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return len(data)
+
+
+def extract_all(m, out_dir, mum_only=False, name_filter=None, jobs=None):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     items = []
@@ -306,10 +326,28 @@ def extract_all(m, out_dir, mum_only=False, name_filter=None):
             continue
         items.append((name, text))
     total = len(items)
+    if jobs is None:
+        jobs = min(8, os.cpu_count() or 1)
+    jobs = max(1, min(int(jobs), 32))
     print("extracting", total, "entries ->", out, flush=True)
     if not mum_only:
         print("note: .manifest entries come first; .mum/.cat follow", flush=True)
-    print("this can take several minutes; do not close the window", flush=True)
+    print("workers:", jobs, flush=True)
+    if jobs > 1 and total > 1 and getattr(m, "path", None) is not None:
+        tasks = [(name, text, str(out)) for name, text in items]
+        try:
+            with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init,
+                                     initargs=(str(m.path),)) as pool:
+                n = 0
+                for _ in pool.map(_worker_write, tasks, chunksize=16):
+                    n += 1
+                    if n % 2000 == 0:
+                        print("  %d/%d" % (n, total), flush=True)
+            print("extracted", n, "->", out)
+            return n
+        except Exception as e:
+            print("parallel extraction failed:", e, flush=True)
+            print("falling back to single process", flush=True)
     n = 0
     for name, text in items:
         data = m.extract(name)
@@ -490,6 +528,7 @@ def simple_extract(argv):
     ap.add_argument("--only-update", action="store_true",
                     help="only update.mum")
     ap.add_argument("--name", help="only one exact entry name")
+    ap.add_argument("--jobs", type=int, default=None, help="parallel workers (default: auto)")
     ap.add_argument("--dest", help="output directory (default: <esd>_extract)")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args(argv)
@@ -500,7 +539,8 @@ def simple_extract(argv):
     try:
         esd = resolve_esd(a.path)
         auto_extract(esd, a.dest, force=a.force, mums=a.only_mum,
-                     container_only=a.only_container, name_filter=name_filter)
+                     container_only=a.only_container, name_filter=name_filter,
+                     jobs=a.jobs)
     except Exception as e:
         ap.error(str(e))
 
@@ -611,7 +651,7 @@ def apply_ops(m, b, args):
 
 
 def auto_extract(esd_path, dest=None, force=False, mums=False, container_only=False,
-                 name_filter=None):
+                 name_filter=None, jobs=None):
     src = Path(esd_path) if esd_path else None
     if src is None:
         found = sorted(Path.cwd().glob("*.mumx.esd"))
@@ -639,7 +679,7 @@ def auto_extract(esd_path, dest=None, force=False, mums=False, container_only=Fa
             print("container only ->", dest / "collection.mumx")
             return dest
         m = Mumx(container)
-        extract_all(m, dest, mum_only=mums, name_filter=name_filter)
+        extract_all(m, dest, mum_only=mums, name_filter=name_filter, jobs=jobs)
     return dest
 
 
@@ -965,6 +1005,7 @@ def main():
                     help="only extract collection.mumx, do not unpack its entries")
     ap.add_argument("--extract", metavar="DIR")
     ap.add_argument("--mum", action="store_true", help="extract only .mum files")
+    ap.add_argument("--jobs", type=int, default=None, help="parallel workers (default: auto)")
     ap.add_argument("--dir", metavar="DIR", help="replace/add MUMs from directory")
     ap.add_argument("--sync", action="store_true", help="delete .mum not present in --dir")
     ap.add_argument("--replace", nargs=2, action="append", default=[],
@@ -984,7 +1025,7 @@ def main():
             return
         try:
             auto_extract(args.esd, args.dest, force=args.force, mums=args.mums,
-                         container_only=args.container_only)
+                         container_only=args.container_only, jobs=args.jobs)
         except Exception as e:
             ap.error(str(e))
         return
@@ -996,7 +1037,7 @@ def main():
             return
         try:
             auto_extract(args.esd, args.dest, force=args.force, mums=args.mums,
-                         container_only=args.container_only)
+                         container_only=args.container_only, jobs=args.jobs)
         except Exception as e:
             ap.error(str(e))
         return
@@ -1022,7 +1063,7 @@ def main():
                 container = esd_to_container(raw_input, tmp)
                 m = Mumx(container)
                 if args.extract:
-                    extract_all(m, args.extract, mum_only=args.mum)
+                    extract_all(m, args.extract, mum_only=args.mum, jobs=args.jobs)
                     if not args.out:
                         return
                 b = Builder(m)
@@ -1046,14 +1087,14 @@ def main():
     if not args.container:
         try:
             auto_extract(args.esd, args.dest, force=args.force, mums=args.mums,
-                         container_only=args.container_only)
+                         container_only=args.container_only, jobs=args.jobs)
         except Exception as e:
             ap.error(str(e))
         return
 
     m = Mumx(args.container)
     if args.extract:
-        extract_all(m, args.extract, mum_only=args.mum)
+        extract_all(m, args.extract, mum_only=args.mum, jobs=args.jobs)
         if not args.out:
             return
     if not args.out:
@@ -1066,4 +1107,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

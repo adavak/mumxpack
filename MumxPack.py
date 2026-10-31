@@ -26,7 +26,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 
 def leb(v):
@@ -427,7 +427,16 @@ def resolve_esd(arg=None):
         if candidate.is_file():
             return candidate
     if not found:
-        raise FileNotFoundError("no *.mumx.esd in %s" % p)
+        # An extracted directory may live next to the only ESD in its parent.
+        siblings = sorted(p.parent.glob("*.mumx.esd"))
+        if len(siblings) == 1:
+            print("using sibling ESD:", siblings[0])
+            return siblings[0]
+        if len(siblings) > 1:
+            raise RuntimeError(
+                "no exact ESD for %s; multiple siblings: %s"
+                % (p, ", ".join(x.name for x in siblings)))
+        raise FileNotFoundError("no *.mumx.esd in %s or its parent" % p)
     if len(found) > 1:
         raise RuntimeError("multiple .mumx.esd files; give one explicitly")
     return found[0]
@@ -444,6 +453,21 @@ def unique_path(path):
     stem, suffix = path.stem, path.suffix
     for i in range(2, 1000):
         candidate = path.parent / ("%s_%d%s" % (stem, i, suffix))
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError("cannot find a free output name for %s" % path)
+
+
+def edited_path(path):
+    path = Path(path)
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    candidate = path.parent / ("%s_edited%s" % (stem, suffix))
+    if not candidate.exists():
+        return candidate
+    for i in range(2, 1000):
+        candidate = path.parent / ("%s_edited_%d%s" % (stem, i, suffix))
         if not candidate.exists():
             return candidate
     raise RuntimeError("cannot find a free output name for %s" % path)
@@ -494,7 +518,7 @@ def drag_mode(paths):
                 if not any(p.glob("*.mum")):
                     raise RuntimeError("no .mum files in directory; refusing empty sync: %s" % p)
                 esd = resolve_esd(p)
-                out = unique_path(p.parent / "new.mumx.esd")
+                out = edited_path(p.parent / "new.mumx.esd")
                 pack_esd(esd, p, out, sync=True)
             elif p.name.lower().endswith(".mumx.esd"):
                 dest = default_extract_dir(p)
@@ -549,14 +573,15 @@ def simple_pack(argv):
     ap = argparse.ArgumentParser(prog="MumxPack pack")
     ap.add_argument("path", nargs="?", help=".mumx.esd or directory (default: cwd)")
     ap.add_argument("--dir", help="extracted files (default: <esd>_extract)")
-    ap.add_argument("--out", default="new.mumx.esd")
+    ap.add_argument("--out", default=None)
     ap.add_argument("--sync", action="store_true", help="delete MUMs not in --dir")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args(argv)
     try:
         esd = resolve_esd(a.path)
         workdir = Path(a.dir) if a.dir else default_extract_dir(esd)
-        pack_esd(esd, workdir, a.out, sync=a.sync, force=a.force)
+        out = Path(a.out) if a.out else edited_path(Path("new.mumx.esd"))
+        pack_esd(esd, workdir, out, sync=a.sync, force=a.force)
     except Exception as e:
         ap.error(str(e))
 
@@ -949,7 +974,7 @@ Drag and drop:
 Defaults:
   extract destination   <esd-file-name>_extract
   pack source           <esd-file-name>_extract
-  pack output           new.mumx.esd
+  pack output           new.mumx.esd / new.mumx_edited.esd if exists
 """)
 
 

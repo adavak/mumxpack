@@ -83,7 +83,7 @@ Defaults:
 ```text
 extract destination : <esd-file-name>_extract
 pack source         : <esd-file-name>_extract
-pack output         : new.mumx.esd
+pack output         : new.mumx.esd (or new.mumx_edited.esd if that exists)
 ```
 
 Examples:

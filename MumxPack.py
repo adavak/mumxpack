@@ -26,7 +26,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 
 
 def leb(v):
@@ -309,13 +309,15 @@ class Builder:
         out += inner
         return bytes(out), len(keys)
 
-    def build(self, out_path, hash_mode="preserve", rebuild_index=True):
+    def build(self, out_path, hash_mode="preserve", rebuild_index=True,
+              force_repack=False):
         m = self.m
-        if not self.dirty and hash_mode == "preserve":
+        if not self.dirty and hash_mode == "preserve" and not force_repack:
             out = Path(out_path)
             if out.resolve() != m.path.resolve():
                 out.write_bytes(m.b)
-                print("no changes: copied original container")
+                print("NO CHANGES: copied original container byte-for-byte")
+                print("use --repack to force a rebuild")
             else:
                 print("no changes: input/output are the same file")
             return m.b
@@ -580,7 +582,7 @@ def edited_path(path):
 
 
 def pack_esd(esd, workdir, out, sync=False, force=False, hash_mode="preserve",
-             rebuild_index=True):
+             rebuild_index=True, force_repack=False):
     esd = Path(esd)
     workdir = Path(workdir)
     if not workdir.is_dir():
@@ -591,16 +593,18 @@ def pack_esd(esd, workdir, out, sync=False, force=False, hash_mode="preserve",
         m = Mumx(container)
         b = Builder(m)
         pack_from_dir(m, b, workdir, sync=sync)
-        if not b.dirty and hash_mode == "preserve":
+        if not b.dirty and hash_mode == "preserve" and not force_repack:
             if out.exists() and not force:
                 raise RuntimeError("%s exists; use -f" % out)
             if out.resolve() != esd.resolve():
                 out.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(esd, out)
-            print("no changes: copied original ESD ->", out)
+            print("NO CHANGES: copied original ESD byte-for-byte ->", out)
+            print("use --repack to force a rebuild")
             return out
         newc = Path(tmp) / "new.mumx"
-        b.build(str(newc), hash_mode, rebuild_index=rebuild_index)
+        b.build(str(newc), hash_mode, rebuild_index=rebuild_index,
+                force_repack=force_repack)
         container_to_esd(newc, out, force=force)
         print("wrote", out)
         return out
@@ -685,13 +689,15 @@ def simple_pack(argv):
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--no-rebuild-index", action="store_true",
                     help="keep the original index table")
+    ap.add_argument("--repack", action="store_true",
+                    help="rebuild even when no entries changed")
     a = ap.parse_args(argv)
     try:
         esd = resolve_esd(a.path)
         workdir = Path(a.dir) if a.dir else default_extract_dir(esd)
         out = Path(a.out) if a.out else unique_path(Path(str(workdir) + ".esd"))
         pack_esd(esd, workdir, out, sync=a.sync, force=a.force,
-                 rebuild_index=not a.no_rebuild_index)
+                 rebuild_index=not a.no_rebuild_index, force_repack=a.repack)
     except Exception as e:
         ap.error(str(e))
 
@@ -1071,6 +1077,7 @@ Usage:
   MumxPack pack --out FILE              use a specific output name
   MumxPack pack --force                 overwrite output
   MumxPack pack --no-rebuild-index      keep the original index table
+  MumxPack pack --repack                rebuild even if nothing changed
   MumxPack info [file|dir]              show header and sections
   MumxPack list [file|dir] [--mum]     list entry names
   MumxPack dump [file|dir]             dump decompressed sections
@@ -1214,7 +1221,7 @@ def main():
                         raise RuntimeError("%s exists; use --force" % out)
                     if out.resolve() != Path(raw_input).resolve():
                         shutil.copy2(raw_input, out)
-                    print("no changes: copied original ESD ->", out)
+                    print("NO CHANGES: copied original ESD byte-for-byte ->", out)
                     return
                 newc = Path(tmp) / "new.mumx"
                 b.build(str(newc), args.hash)

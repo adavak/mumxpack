@@ -26,7 +26,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 
 
 def leb(v):
@@ -253,7 +253,63 @@ class Builder:
         self.entry_by_name[name] = dict(section=es, entry_id=eid, offset=off)
         self.dirty = True
 
-    def build(self, out_path, hash_mode="preserve"):
+    def rebuild_index(self):
+        sec = next((s for s in self.m.secs if s["type"] == 5), None)
+        if sec is None:
+            return None
+        payload = self.m.b[sec["off"]:sec["off"] + sec["ps"]]
+        p = 0
+        version, p = read_leb(payload, p)
+        if version != 1:
+            return None
+        nlen, p = read_leb(payload, p)
+        name = payload[p:p + nlen]
+        p += nlen
+        comparer, p = read_leb(payload, p)
+        value_type, p = read_leb(payload, p)
+        if value_type != 0:
+            return None
+        names = set(self.entry_by_name)
+        mapping = {}
+        for cat in names:
+            if not cat.lower().endswith(b".cat"):
+                continue
+            mum = cat[:-4] + b".mum"
+            if mum not in names:
+                continue
+            if mum == b"update.mum" or mum.startswith(b"Package_for_"):
+                continue
+            mapping[mum] = cat
+        keys = sorted(mapping, key=(lambda x: x.lower()) if comparer == 1 else (lambda x: x))
+        pool = bytearray()
+        offsets = {}
+        table = bytearray()
+        def pool_string(value):
+            if value in offsets:
+                return offsets[value]
+            off = len(pool)
+            pool.extend(leb(len(value)))
+            pool.extend(value)
+            offsets[value] = off
+            return off
+        for key in keys:
+            table.extend(leb(pool_string(key)))
+            table.extend(leb(pool_string(mapping[key])))
+        out = bytearray()
+        out.extend(leb(1))
+        out.extend(leb(len(name)))
+        out.extend(name)
+        out.extend(leb(comparer))
+        out.extend(leb(value_type))
+        pool_stream, pool_bis = compress_stream(bytes(pool))
+        inner = struct.pack(">IqqqIIqq", 2, 0, len(pool_stream), 0,
+                            2, 1048576, len(pool), pool_bis)
+        inner += pool_stream
+        inner += bytes(table)
+        out += inner
+        return bytes(out), len(keys)
+
+    def build(self, out_path, hash_mode="preserve", rebuild_index=True):
         m = self.m
         if not self.dirty and hash_mode == "preserve":
             out = Path(out_path)
@@ -266,6 +322,8 @@ class Builder:
         sec0_stream, sec0_bis = compress_stream(bytes(self.strings))
         sec1_stream, sec1_bis = compress_stream(bytes(self.names))
 
+        index_override = self.rebuild_index() if rebuild_index else None
+        index_count = index_override[1] if index_override else None
         entry_blobs = {}
         for i, es in enumerate(m.entry_sections):
             tree_stream, tree_bis = compress_stream(bytes(self.trees[i]))
@@ -291,6 +349,8 @@ class Builder:
                 blobs[i] = (entry_blobs[i], 0, 0, len(entry_blobs[i]), 0)
             elif sec["type"] == 0:
                 blobs[i] = (sec0_stream, 2, 1048576, len(self.strings), sec0_bis)
+            elif sec["type"] == 5 and index_override is not None:
+                blobs[i] = (index_override[0], 0, 0, 0, 0)
             else:
                 payload = m.b[sec["off"]:sec["off"] + sec["ps"]]
                 blobs[i] = (payload, sec["alg"], sec["bs"], sec["us"], sec["bis"])
@@ -309,8 +369,9 @@ class Builder:
         out = bytearray(head)
         for i, sec in enumerate(m.secs):
             payload, alg, bs, us, bis = blobs[i]
+            po = index_count if sec["type"] == 5 and index_count is not None else sec["po"]
             out += struct.pack(">IqqqIIqq", 2, sec["type"], len(payload),
-                               sec["po"], alg, bs, us, bis)
+                               po, alg, bs, us, bis)
             out += payload
 
         if hash_mode == "sha256":
@@ -518,7 +579,8 @@ def edited_path(path):
     raise RuntimeError("cannot find a free output name for %s" % path)
 
 
-def pack_esd(esd, workdir, out, sync=False, force=False, hash_mode="preserve"):
+def pack_esd(esd, workdir, out, sync=False, force=False, hash_mode="preserve",
+             rebuild_index=True):
     esd = Path(esd)
     workdir = Path(workdir)
     if not workdir.is_dir():
@@ -538,7 +600,7 @@ def pack_esd(esd, workdir, out, sync=False, force=False, hash_mode="preserve"):
             print("no changes: copied original ESD ->", out)
             return out
         newc = Path(tmp) / "new.mumx"
-        b.build(str(newc), hash_mode)
+        b.build(str(newc), hash_mode, rebuild_index=rebuild_index)
         container_to_esd(newc, out, force=force)
         print("wrote", out)
         return out
@@ -621,12 +683,15 @@ def simple_pack(argv):
     ap.add_argument("--out", default=None)
     ap.add_argument("--sync", action="store_true", help="delete MUMs not in --dir")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--no-rebuild-index", action="store_true",
+                    help="keep the original index table")
     a = ap.parse_args(argv)
     try:
         esd = resolve_esd(a.path)
         workdir = Path(a.dir) if a.dir else default_extract_dir(esd)
         out = Path(a.out) if a.out else unique_path(Path(str(workdir) + ".esd"))
-        pack_esd(esd, workdir, out, sync=a.sync, force=a.force)
+        pack_esd(esd, workdir, out, sync=a.sync, force=a.force,
+                 rebuild_index=not a.no_rebuild_index)
     except Exception as e:
         ap.error(str(e))
 
@@ -1005,6 +1070,7 @@ Usage:
   MumxPack pack --dir DIR               use a specific extract directory
   MumxPack pack --out FILE              use a specific output name
   MumxPack pack --force                 overwrite output
+  MumxPack pack --no-rebuild-index      keep the original index table
   MumxPack info [file|dir]              show header and sections
   MumxPack list [file|dir] [--mum]     list entry names
   MumxPack dump [file|dir]             dump decompressed sections

@@ -135,6 +135,7 @@ MumxPack extract --dest out
 MumxPack pack --dir out --out out.esd
 MumxPack pack --sync
 MumxPack pack --force
+MumxPack pack --no-rebuild-index
 ```
 
 Explicit container editing:
@@ -187,7 +188,7 @@ See `vendor\NOTICE.txt` and `vendor\COPYING`.
 
 Payloads are XPRESS-compressed. The reader/writer uses Windows `RtlDecompressBufferEx` / `RtlCompressBuffer` through `ctypes`.
 
-The header content-hash field is preserved by default. The exact Microsoft content-hash input format has not been reproduced. The index table is preserved; adding or removing entries does not rebuild it.
+The header content-hash field is preserved by default. The exact Microsoft content-hash input format has not been reproduced. The package-catalog index (`PackageCatalogMap`) is rebuilt by default when entries change; use `--no-rebuild-index` to keep the original table.
 
 Test any modified image in a VM before using it.
 

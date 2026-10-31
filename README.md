@@ -83,18 +83,18 @@ The console stays open after a drag operation so the result can be read.
 
 ## No-change behavior
 
-If nothing changed, `pack` does not rebuild the ESD. It copies the source
-ESD byte-for-byte and prints:
+Drag-and-drop and the interactive pack action always rebuild the ESD, even
+when no entry changed.
+
+Command-line `pack` is the exception: if nothing changed, it copies the
+source ESD byte-for-byte and prints:
 
 ```text
 NO CHANGES: copied original ESD byte-for-byte
 use --repack to force a rebuild
 ```
 
-This is intentional: an unchanged copy keeps the original hash and avoids
-rewriting 127 MB of identical data.
-
-To force a real recompression even when nothing changed:
+To force a real recompression from the command line:
 
 ```text
 MumxPack pack --repack

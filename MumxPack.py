@@ -26,7 +26,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 
 
 def leb(v):
@@ -630,7 +630,7 @@ def drag_mode(paths):
                     raise RuntimeError("no .mum files in directory; refusing empty sync: %s" % p)
                 esd = resolve_esd(p)
                 out = unique_path(Path(str(p) + ".esd"))
-                pack_esd(esd, p, out, sync=True)
+                pack_esd(esd, p, out, sync=True, force_repack=True)
             elif p.name.lower().endswith(".mumx.esd"):
                 dest = default_extract_dir(p)
                 if dest.exists() and any(dest.iterdir()):
@@ -731,7 +731,7 @@ def interactive():
     elif choice == "3":
         auto_extract(esd, dest, container_only=True)
     elif choice == "4":
-        pack_esd(esd, dest, unique_path(Path(str(dest) + ".esd")))
+        pack_esd(esd, dest, unique_path(Path(str(dest) + ".esd")), force_repack=True)
     if getattr(sys, "frozen", False):
         pause()
 

@@ -26,7 +26,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 
 
 def leb(v):
@@ -563,7 +563,7 @@ def drag_mode(paths):
                 if not any(p.glob("*.mum")):
                     raise RuntimeError("no .mum files in directory; refusing empty sync: %s" % p)
                 esd = resolve_esd(p)
-                out = edited_path(p.parent / "new.mumx.esd")
+                out = unique_path(Path(str(p) + ".esd"))
                 pack_esd(esd, p, out, sync=True)
             elif p.name.lower().endswith(".mumx.esd"):
                 dest = default_extract_dir(p)
@@ -625,7 +625,7 @@ def simple_pack(argv):
     try:
         esd = resolve_esd(a.path)
         workdir = Path(a.dir) if a.dir else default_extract_dir(esd)
-        out = Path(a.out) if a.out else edited_path(Path("new.mumx.esd"))
+        out = Path(a.out) if a.out else unique_path(Path(str(workdir) + ".esd"))
         pack_esd(esd, workdir, out, sync=a.sync, force=a.force)
     except Exception as e:
         ap.error(str(e))
@@ -647,7 +647,7 @@ def interactive():
     print("  1) extract all files")
     print("  2) extract only .mum")
     print("  3) extract collection.mumx only")
-    print("  4) pack to new.mumx.esd")
+    print("  4) pack to <extract-dir-name>.esd")
     print("  q) quit")
     try:
         choice = input("> ").strip().lower()
@@ -660,7 +660,7 @@ def interactive():
     elif choice == "3":
         auto_extract(esd, dest, container_only=True)
     elif choice == "4":
-        pack_esd(esd, dest, "new.mumx.esd")
+        pack_esd(esd, dest, unique_path(Path(str(dest) + ".esd")))
     if getattr(sys, "frozen", False):
         pause()
 
@@ -677,7 +677,7 @@ def print_extract_hint(esd=None):
     print("  MumxPack extract                         extract all entries")
     print("  MumxPack extract --only-mum              extract only .mum")
     print("  MumxPack extract --only-container        extract collection.mumx only")
-    print("  MumxPack pack                            pack back to new.mumx.esd")
+    print("  MumxPack pack                            pack back to <extract-dir>.esd")
 
 
 def esd_to_container(esd, tmpdir):
@@ -1000,7 +1000,7 @@ Usage:
   MumxPack extract --only-update        extract only update.mum
   MumxPack mum                          same as extract --only-mum
   MumxPack extract --only-container     extract collection.mumx only
-  MumxPack pack [file|dir]              pack back to new.mumx.esd
+  MumxPack pack [file|dir]              pack back to <extract-dir>.esd
   MumxPack pack --sync                  delete .mum not present in directory
   MumxPack pack --dir DIR               use a specific extract directory
   MumxPack pack --out FILE              use a specific output name
@@ -1013,13 +1013,13 @@ Usage:
 
 Drag and drop:
   xxx.mumx.esd          -> xxx.mumx.esd_extract\\
-  xxx.mumx.esd_extract  -> new.mumx.esd
+  xxx.mumx.esd_extract  -> xxx.mumx.esd_extract.esd
   collection.mumx       -> collection.mumx_extract\\
 
 Defaults:
   extract destination   <esd-file-name>_extract
   pack source           <esd-file-name>_extract
-  pack output           new.mumx.esd / new.mumx_edited.esd if exists
+  pack output           <extract-dir-name>.esd (unique suffix if exists)
 
 Packing requires a base .mumx.esd or collection.mumx.
 An extracted directory alone is not a complete container.
@@ -1128,9 +1128,10 @@ def main():
             print_extract_hint(raw_input)
             return
         if not args.out and (args.dir or args.replace or args.add or args.delete):
-            args.out = "new.mumx.esd"
+            workdir = Path(args.dir) if args.dir else default_extract_dir(Path(raw_input))
+            args.out = str(unique_path(Path(str(workdir) + ".esd")))
         if not args.out and not args.extract:
-            ap.error("output is required; e.g. new.mumx.esd")
+            ap.error("output is required; e.g. extract-dir-name.esd")
         try:
             with tempfile.TemporaryDirectory(prefix="MumxPack_src_") as tmp:
                 container = esd_to_container(raw_input, tmp)

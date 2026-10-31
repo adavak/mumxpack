@@ -73,7 +73,7 @@ xxx.mumx.esd
   -> xxx.mumx.esd_extract\        (all entries, no container)
 
 xxx.mumx.esd_extract\
-  -> new.mumx.esd                 (pack directory back to ESD)
+  -> xxx.mumx.esd_extract.esd     (pack directory back to ESD)
 
 collection.mumx
   -> collection.mumx_extract\     (all entries)
@@ -125,14 +125,14 @@ Defaults:
 ```text
 extract destination : <esd-file-name>_extract
 pack source         : <esd-file-name>_extract
-pack output         : new.mumx.esd (or new.mumx_edited.esd if that exists)
+pack output         : <extract-dir-name>.esd (unique suffix if it exists)
 ```
 
 Examples:
 
 ```text
 MumxPack extract --dest out
-MumxPack pack --dir out --out new.mumx.esd
+MumxPack pack --dir out --out out.esd
 MumxPack pack --sync
 MumxPack pack --force
 ```

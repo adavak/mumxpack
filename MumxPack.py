@@ -23,7 +23,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 
 def leb(v):
@@ -295,7 +295,7 @@ class Builder:
 def extract_all(m, out_dir, mum_only=False, name_filter=None):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    n = 0
+    items = []
     for rec, name in m.names:
         text = name.decode("utf-8", "replace")
         if name_filter and text != name_filter:
@@ -304,11 +304,21 @@ def extract_all(m, out_dir, mum_only=False, name_filter=None):
             continue
         if m.entry_for_name(name) is None:
             continue
+        items.append((name, text))
+    total = len(items)
+    print("extracting", total, "entries ->", out, flush=True)
+    if not mum_only:
+        print("note: .manifest entries come first; .mum/.cat follow", flush=True)
+    print("this can take several minutes; do not close the window", flush=True)
+    n = 0
+    for name, text in items:
         data = m.extract(name)
         p = out / text
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(data)
         n += 1
+        if n % 2000 == 0:
+            print("  %d/%d" % (n, total), flush=True)
     print("extracted", n, "->", out)
     return n
 
@@ -451,13 +461,15 @@ def drag_mode(paths):
             elif p.name.lower().endswith(".mumx.esd"):
                 dest = default_extract_dir(p)
                 if dest.exists() and any(dest.iterdir()):
-                    print("already exists, skip:", dest)
+                    print("output exists, not overwriting:", dest)
+                    print("delete it or use extract --force")
                 else:
                     auto_extract(p, dest)
             elif p.name.lower().endswith(".mumx") or p.name.lower() == "collection.mumx":
                 dest = default_extract_dir(p)
                 if dest.exists() and any(dest.iterdir()):
-                    print("already exists, skip:", dest)
+                    print("output exists, not overwriting:", dest)
+                    print("delete it or use extract --force")
                 else:
                     m = Mumx(p)
                     extract_all(m, dest)

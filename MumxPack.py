@@ -26,7 +26,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 
 def leb(v):
@@ -436,7 +436,8 @@ def resolve_esd(arg=None):
             raise RuntimeError(
                 "no exact ESD for %s; multiple siblings: %s"
                 % (p, ", ".join(x.name for x in siblings)))
-        raise FileNotFoundError("no *.mumx.esd in %s or its parent" % p)
+        raise FileNotFoundError(
+                "no *.mumx.esd in %s or its parent; an extracted directory alone cannot be packed" % p)
     if len(found) > 1:
         raise RuntimeError("multiple .mumx.esd files; give one explicitly")
     return found[0]
@@ -975,6 +976,9 @@ Defaults:
   extract destination   <esd-file-name>_extract
   pack source           <esd-file-name>_extract
   pack output           new.mumx.esd / new.mumx_edited.esd if exists
+
+Packing requires a base .mumx.esd or collection.mumx.
+An extracted directory alone is not a complete container.
 """)
 
 

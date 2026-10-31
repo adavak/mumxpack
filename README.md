@@ -9,6 +9,28 @@ Extract, edit and repack Windows servicing `MUMX` containers.
 
 It can unpack every named entry (`.mum`, `.cat`, `.manifest`, ...), replace or add individual MUM files, delete MUMs, and write the result back to a `collection.mumx` or a new `.mumx.esd`.
 
+## Important: an extracted directory is not a standalone container
+
+`extract` writes individual files. That directory is **not** a complete
+MUMX container and cannot be packed by itself.
+
+Packing always needs a base container:
+
+- the original `*.mumx.esd`, or
+- a `collection.mumx`
+
+MumxPack is a patcher: it applies the directory's `.mum` changes onto that
+base container, then writes a new ESD/container. It does not compile a new
+MUMX container from a bare directory.
+
+If the exact ESD name is missing, MumxPack 1.0.3+ uses the only sibling
+`*.mumx.esd` in the parent directory. If there is no ESD or
+`collection.mumx` anywhere, packing fails.
+
+Do not use `wimlib capture` on the extracted directory as a replacement
+for a MUMX ESD. That creates a WIM containing loose files, not a valid
+`collection.mumx`.
+
 ## Features
 
 - Inspect the container header and section table
@@ -53,6 +75,9 @@ collection.mumx
 ```
 
 The console stays open after a drag operation so the result can be read.
+
+Dragging `_extract` back onto the EXE requires a base `*.mumx.esd` in the
+same parent directory (or a base passed explicitly on the command line).
 
 ## Commands
 

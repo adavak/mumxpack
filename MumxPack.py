@@ -6,6 +6,7 @@ Changed MUM XML is appended as a new entry tree; existing trees/offsets are
 left untouched, so shared refs in the container stay valid.
 """
 import argparse
+import fnmatch
 import multiprocessing
 import os
 import hashlib
@@ -26,7 +27,26 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.9"
+VERSION = "1.0.10"
+
+# Fixed .mum wildcards that W10UI uses when it reads the mounted image.
+# WinPE-Setup-Package is the one that broke boot.wim syncing with MumX media;
+# the rest are existence/cleanup/version checks that also read image-side .mum.
+W10UI_MUM_GLOBS = [
+    "WinPE-Setup-Package~*.mum",
+    "WinPE-Rejuv-Package~*.mum",
+    "WinPE-SRT-Package~*.mum",
+    "Package_for_RollupFix*.mum",
+    "Package_for_RevisedFix*.mum",
+    "Microsoft-Windows-EnterpriseS*Edition~*.mum",
+    "Microsoft-Windows-Server*Edition~*.mum",
+    "Microsoft-Windows-ServerAzureStackHCI*Edition~*.mum",
+    "Microsoft-Windows-UserExperience-Desktop*.mum",
+    "Microsoft-Windows-Client-Desktop-Required-Package*.mum",
+    "Adobe-Flash-For-Windows-Package*.mum",
+    "*OasisAssets-Package*.mum",
+    "*enablement-package*.mum",
+]
 
 
 def leb(v):
@@ -402,15 +422,21 @@ def _worker_write(item):
     return len(data)
 
 
-def extract_all(m, out_dir, mum_only=False, name_filter=None, jobs=None):
+def extract_all(m, out_dir, mum_only=False, name_filter=None, jobs=None, globs=None):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     items = []
+    patterns = [g.lower() for g in globs] if globs else None
     for rec, name in m.names:
         text = name.decode("utf-8", "replace")
         if name_filter and text != name_filter:
             continue
-        if mum_only and not text.lower().endswith(".mum"):
+        if patterns is not None:
+            if not text.lower().endswith(".mum"):
+                continue
+            if not any(fnmatch.fnmatchcase(text.lower(), p) for p in patterns):
+                continue
+        elif mum_only and not text.lower().endswith(".mum"):
             continue
         if m.entry_for_name(name) is None:
             continue
@@ -663,19 +689,29 @@ def simple_extract(argv):
     ap.add_argument("--only-update", action="store_true",
                     help="only update.mum")
     ap.add_argument("--name", help="only one exact entry name")
+    ap.add_argument("--mum-glob", action="append", default=[], metavar="PATTERN",
+                    help="only .mum entries matching a wildcard (repeatable)")
+    ap.add_argument("--w10ui", action="store_true",
+                    help="preset: image-side .mum wildcards used by W10UI")
     ap.add_argument("--jobs", type=int, default=None, help="parallel workers (default: auto)")
     ap.add_argument("--dest", help="output directory (default: <esd>_extract)")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args(argv)
+    if a.w10ui and a.mum_glob:
+        ap.error("choose --w10ui or --mum-glob, not both")
+    if (a.mum_glob or a.w10ui) and (a.only_container or a.only_update or a.name):
+        ap.error("--mum-glob/--w10ui cannot be combined with "
+                 "--only-container / --only-update / --name")
     modes = sum(bool(x) for x in (a.only_mum, a.only_container, a.only_update, a.name))
     if modes > 1:
         ap.error("choose only one of --only-mum / --only-container / --only-update / --name")
+    globs = W10UI_MUM_GLOBS if a.w10ui else (a.mum_glob or None)
     name_filter = "update.mum" if a.only_update else a.name
     try:
         esd = resolve_esd(a.path)
-        auto_extract(esd, a.dest, force=a.force, mums=a.only_mum,
+        auto_extract(esd, a.dest, force=a.force, mums=a.only_mum or bool(globs),
                      container_only=a.only_container, name_filter=name_filter,
-                     jobs=a.jobs)
+                     jobs=a.jobs, globs=globs)
     except Exception as e:
         ap.error(str(e))
 
@@ -792,7 +828,7 @@ def apply_ops(m, b, args):
 
 
 def auto_extract(esd_path, dest=None, force=False, mums=False, container_only=False,
-                 name_filter=None, jobs=None):
+                 name_filter=None, jobs=None, globs=None):
     src = Path(esd_path) if esd_path else None
     if src is None:
         found = sorted(Path.cwd().glob("*.mumx.esd"))
@@ -820,7 +856,8 @@ def auto_extract(esd_path, dest=None, force=False, mums=False, container_only=Fa
             print("container only ->", dest / "collection.mumx")
             return dest
         m = Mumx(container)
-        extract_all(m, dest, mum_only=mums, name_filter=name_filter, jobs=jobs)
+        extract_all(m, dest, mum_only=mums, name_filter=name_filter, jobs=jobs,
+                    globs=globs)
     return dest
 
 
@@ -918,6 +955,8 @@ def simple_list(argv):
     ap = argparse.ArgumentParser(prog="MumxPack list")
     ap.add_argument("path", nargs="?", help=".mumx.esd, collection.mumx, or directory")
     ap.add_argument("--mum", action="store_true", help="only .mum")
+    ap.add_argument("--glob", action="append", default=[], metavar="PATTERN",
+                    help="only names matching a wildcard (repeatable)")
     ap.add_argument("--all", action="store_true", help="print all matching names")
     ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--sizes", action="store_true", help="print entry sizes")
@@ -925,10 +964,14 @@ def simple_list(argv):
     try:
         path = resolve_container(a.path)
         m, src, _ = load_for_read(path)
+        patterns = [p.lower() for p in a.glob]
         names = []
         for _, name in m.names:
             text = name.decode("utf-8", "replace")
             if a.mum and not text.lower().endswith(".mum"):
+                continue
+            if patterns and not any(fnmatch.fnmatchcase(text.lower(), p)
+                                    for p in patterns):
                 continue
             if m.entry_for_name(name) is None:
                 continue
@@ -1068,6 +1111,8 @@ Usage:
   MumxPack                              interactive menu
   MumxPack extract [file|dir]           extract all entries
   MumxPack extract --only-mum           extract all .mum files
+  MumxPack extract --mum-glob PATTERN   extract only .mum names matching a wildcard
+  MumxPack extract --w10ui              extract the .mum names W10UI looks for
   MumxPack extract --only-update        extract only update.mum
   MumxPack mum                          same as extract --only-mum
   MumxPack extract --only-container     extract collection.mumx only
@@ -1079,7 +1124,8 @@ Usage:
   MumxPack pack --no-rebuild-index      keep the original index table
   MumxPack pack --repack                rebuild even if nothing changed
   MumxPack info [file|dir]              show header and sections
-  MumxPack list [file|dir] [--mum]     list entry names
+  MumxPack list [file|dir] [--mum] [--glob PATTERN]
+                                        list entry names
   MumxPack dump [file|dir]             dump decompressed sections
   MumxPack index [file|dir]            show index table headers
   MumxPack selftest [file|dir]         load and validate the container
@@ -1147,6 +1193,10 @@ def main():
                     help="extract destination (default: <esd-file-name>_extract)")
     ap.add_argument("--force", action="store_true", help="allow non-empty --dest")
     ap.add_argument("--mums", action="store_true", help="unpack only .mum files")
+    ap.add_argument("--mum-glob", action="append", default=[], metavar="PATTERN",
+                    help="only .mum entries matching a wildcard (repeatable)")
+    ap.add_argument("--w10ui", action="store_true",
+                    help="preset: image-side .mum wildcards used by W10UI")
     ap.add_argument("--container-only", action="store_true",
                     help="only extract collection.mumx, do not unpack its entries")
     ap.add_argument("--extract", metavar="DIR")
@@ -1161,6 +1211,11 @@ def main():
     ap.add_argument("--delete", action="append", default=[], metavar="NAME")
     ap.add_argument("--hash", choices=["preserve", "sha256"], default="preserve")
     args = ap.parse_args()
+    if args.w10ui and args.mum_glob:
+        ap.error("choose --w10ui or --mum-glob, not both")
+    globs = W10UI_MUM_GLOBS if args.w10ui else (args.mum_glob or None)
+    if globs:
+        args.mums = True
 
     raw_input = args.container or args.esd
     pack_ops = bool(args.dir or args.replace or args.add or args.delete or args.out)
@@ -1171,7 +1226,8 @@ def main():
             return
         try:
             auto_extract(args.esd, args.dest, force=args.force, mums=args.mums,
-                         container_only=args.container_only, jobs=args.jobs)
+                         container_only=args.container_only, jobs=args.jobs,
+                         globs=globs)
         except Exception as e:
             ap.error(str(e))
         return
@@ -1183,7 +1239,8 @@ def main():
             return
         try:
             auto_extract(args.esd, args.dest, force=args.force, mums=args.mums,
-                         container_only=args.container_only, jobs=args.jobs)
+                         container_only=args.container_only, jobs=args.jobs,
+                         globs=globs)
         except Exception as e:
             ap.error(str(e))
         return
@@ -1192,7 +1249,7 @@ def main():
     if is_esd and extract_action and not args.out and not args.extract and not pack_ops:
         try:
             auto_extract(raw_input, args.dest, force=args.force, mums=args.mums,
-                         container_only=args.container_only)
+                         container_only=args.container_only, globs=globs)
         except Exception as e:
             ap.error(str(e))
         return
@@ -1234,7 +1291,8 @@ def main():
     if not args.container:
         try:
             auto_extract(args.esd, args.dest, force=args.force, mums=args.mums,
-                         container_only=args.container_only, jobs=args.jobs)
+                         container_only=args.container_only, jobs=args.jobs,
+                         globs=globs)
         except Exception as e:
             ap.error(str(e))
         return

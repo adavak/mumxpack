@@ -39,6 +39,7 @@ for a MUMX ESD. That creates a WIM containing loose files, not a valid
 - List entries and extension counts
 - Extract all entries from `collection.mumx`
 - Extract only `.mum` files
+- Extract only `.mum` entries matching wildcards (`--mum-glob`, or the `--w10ui` preset)
 - Extract only `update.mum`
 - Extract only one named entry
 - Extract only `collection.mumx` from an ESD
@@ -113,11 +114,15 @@ MumxPack extract --only-mum
 MumxPack extract --only-update
 MumxPack extract --only-container
 MumxPack extract --name "exact-name.mum"
+MumxPack extract --mum-glob "WinPE-Setup-Package~*.mum"
+MumxPack extract --mum-glob "WinPE-*" --mum-glob "Package_for_RollupFix*"
+MumxPack extract --w10ui --dest w10ui_cache
 MumxPack extract --jobs 8
 MumxPack mum
 MumxPack pack
 MumxPack info
 MumxPack list --mum
+MumxPack list --mum --glob "WinPE-*" --all
 MumxPack list --mum --sizes
 MumxPack dump --out sections
 MumxPack index
@@ -126,6 +131,17 @@ MumxPack selftest
 
 `mum` means **all `.mum` files** (same as `extract --only-mum`).
 Use `extract --only-update` when only `update.mum` is wanted.
+
+`--mum-glob` extracts only `.mum` entries whose name matches the wildcard
+(`*` and `?`, case-insensitive, repeatable). `--w10ui` is a preset for the
+image-side wildcards W10UI uses, mainly `WinPE-Setup-Package~*.mum`,
+`WinPE-Rejuv-Package~*.mum`, `WinPE-SRT-Package~*.mum` and
+`Package_for_RollupFix*.mum`. On an LCU container this selects about 700
+small files (the packaged manifests), not payload.
+
+These extracted files are the **LCU's** package manifests. They can answer
+"does this update install package X", but they are not the image's installed
+state; do not use them as a replacement for `mumversion`-style checks.
 
 `--dir` reads `.mum`, `.cat`, `.manifest` and `.xml` files and reports
 changes by type:

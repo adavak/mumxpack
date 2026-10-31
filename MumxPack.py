@@ -23,6 +23,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
+VERSION = "1.0.0"
 
 
 def leb(v):
@@ -870,6 +871,7 @@ def print_help():
     print("""MumxPack - MUMX extract/pack tool
 
 Usage:
+  MumxPack --version                    show version
   MumxPack                              interactive menu
   MumxPack extract [file|dir]           extract all entries
   MumxPack extract --only-mum           extract all .mum files
@@ -903,6 +905,9 @@ def main():
     argv = sys.argv[1:]
     if argv in (["-h"], ["--help"]):
         print_help()
+        return
+    if argv in (["-V"], ["--version"]):
+        print("MumxPack", VERSION)
         return
     if not argv:
         interactive()

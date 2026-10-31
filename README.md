@@ -27,16 +27,11 @@ It can unpack every named entry (`.mum`, `.cat`, `.manifest`, ...), replace or a
 
 - Windows
 - Python 3.10+ (tested with Python 3.14)
-- [wimlib](https://wimlib.net/) `wimlib-imagex.exe` (+ `libwim-15.dll` on Windows)
+- wimlib 1.14.5 is included in `vendor\`:
+  - `vendor\wimlib-imagex.exe`
+  - `vendor\libwim-15.dll`
 
-Put wimlib in one of these places:
-
-```text
-vendor\wimlib-imagex.exe
-vendor\libwim-15.dll
-```
-
-or add it to `PATH`, or set:
+`MumxPack` also accepts wimlib from `PATH` or from:
 
 ```text
 set WIMLIB=C:\path\to\wimlib-imagex.exe
@@ -109,7 +104,7 @@ MumxPack collection.mumx new.mumx --delete "C.mum"
 
 ## Build a single EXE
 
-Place wimlib files in `vendor\`:
+The required wimlib binaries are already in `vendor\`:
 
 ```text
 vendor\wimlib-imagex.exe
@@ -129,6 +124,14 @@ dist\MumxPack.exe
 ```
 
 The EXE is a PyInstaller one-file build and includes Python, `wimlib-imagex.exe` and `libwim-15.dll`.
+
+## Third-party notices
+
+`vendor\wimlib-imagex.exe` and `vendor\libwim-15.dll` are unmodified
+wimlib 1.14.5 binaries, copyright 2012-2023 Eric Biggers, licensed under
+the GNU General Public License version 3 or later.
+
+See `vendor\NOTICE.txt` and `vendor\COPYING`.
 
 ## MUMX notes
 

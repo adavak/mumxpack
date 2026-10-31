@@ -4,8 +4,6 @@ __pycache__/
 build/
 dist/
 *.spec
-vendor/*.exe
-vendor/*.dll
 extract/
 *_extract/
 new.mumx.esd

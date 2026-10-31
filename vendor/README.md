@@ -1,12 +1,15 @@
 # vendor
 
-Place the wimlib Windows binaries here before building:
+Bundled wimlib Windows binaries:
 
 ```text
-vendor\wimlib-imagex.exe
-vendor\libwim-15.dll
+wimlib-imagex.exe
+libwim-15.dll
 ```
 
-Download wimlib from https://wimlib.net/ and use the Windows x64 package.
+These are unmodified binaries from wimlib 1.14.5.
 
-These binaries are intentionally not committed to this repository.
+- Project: https://wimlib.net/
+- Source: https://github.com/ebiggers/wimlib
+- Copyright 2012-2023 Eric Biggers
+- License: GPLv3 or later; see `COPYING` and `NOTICE.txt`

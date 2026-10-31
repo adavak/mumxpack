@@ -1,0 +1,15 @@
+wimlib-imagex.exe and libwim-15.dll
+===================================
+
+Version: 1.14.5
+Copyright 2012-2023 Eric Biggers
+
+This software is licensed under the GNU General Public License,
+version 3 or (at your option) any later version.
+
+License text: see COPYING in this directory.
+Project: https://wimlib.net/
+Source code: https://github.com/ebiggers/wimlib
+
+The binaries are bundled unmodified. mumxpack only invokes
+wimlib-imagex.exe as a separate process.

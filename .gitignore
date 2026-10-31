@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+*.spec
+vendor/*.exe
+vendor/*.dll
+extract/
+*_extract/
+new.mumx.esd
+new.mumx_*.esd
+.env

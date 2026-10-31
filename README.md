@@ -7,7 +7,9 @@ Extract, edit and repack Windows servicing `MUMX` containers.
 - `collection.mumx` - the MUMX v2 binary XML container
 - `*.mumx.esd` - a WIM wrapper containing `collection.mumx`
 
-It can unpack every named entry (`.mum`, `.cat`, `.manifest`, ...), replace or add individual MUM files, delete MUMs, and write the result back to a `collection.mumx` or a new `.mumx.esd`.
+It can unpack every named entry (`.mum`, `.cat`, `.manifest`, ...),
+replace, add or delete individual entries, and write the result back to a
+`collection.mumx` or a new `.mumx.esd`.
 
 ## Important: an extracted directory is not a standalone container
 
@@ -40,7 +42,10 @@ for a MUMX ESD. That creates a WIM containing loose files, not a valid
 - Extract only `update.mum`
 - Extract only one named entry
 - Extract only `collection.mumx` from an ESD
-- Replace / add / delete individual `.mum` entries
+- Replace / add / delete individual entries:
+  - `.mum` (XML entry tree)
+  - `.manifest` / `.xml` (XML entry tree)
+  - `.cat` (ASN.1 binary entry)
 - Repack to `collection.mumx`
 - Repack to a single-file `.mumx.esd`
 - No-op fast path: if nothing changed, the original container or ESD is copied byte-for-byte
@@ -102,6 +107,18 @@ MumxPack selftest
 
 `mum` means **all `.mum` files** (same as `extract --only-mum`).
 Use `extract --only-update` when only `update.mum` is wanted.
+
+`--dir` reads `.mum`, `.cat`, `.manifest` and `.xml` files and reports
+changes by type:
+
+```text
+dir unchanged 57770 changed 3 added 2 deleted 1
+changed by type: {'.cat': 1, '.manifest': 1, '.mum': 1}
+```
+
+With `--sync`, a full extraction directory also deletes entries that are
+missing from the directory. A directory containing only `.mum` files
+only syncs `.mum` entries.
 
 Defaults:
 

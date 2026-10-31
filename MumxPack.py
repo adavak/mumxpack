@@ -26,7 +26,7 @@ from mumx_lib import (Mumx, Node, serialize_node, compress_stream,  # noqa: E402
                       decompress_pool_at)
 
 BOM = b"\xEF\xBB\xBF"
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 
 def leb(v):
@@ -179,17 +179,40 @@ class Builder:
             root.declaration_id = self.add_string(root.tag)
         return self._encode_node(root, True)
 
+    def _asn1_section(self):
+        for i, es in enumerate(self.m.entry_sections):
+            if es["asn1"]:
+                return i
+        raise ValueError("container has no ASN.1 entry section")
+
+    def make_asn1_tree(self, data):
+        # Store the raw blob in section 0 and point an ASN.1 leaf at it.
+        off = len(self.strings)
+        self.strings += data
+        digest = hashlib.sha256(data).digest()
+        out = bytearray()
+        out += leb(0)          # ref = inline
+        out += leb(2)          # flags: hash + size
+        out += leb(0)          # ignored
+        out += leb(len(digest)) + digest
+        out += leb(len(data))  # size1
+        out += leb(len(data))  # size2
+        out += leb(off)        # data-pool offset
+        out += leb(len(data))  # data size
+        return bytes(out)
+
     def replace(self, name, data):
         name = name.encode("utf-8") if isinstance(name, str) else name
         entry = self.entry_by_name.get(name)
         if entry is None:
             raise KeyError("not found: %s" % name.decode("utf-8", "replace"))
         es = entry["section"]
-        if self.m.entry_sections[es]["asn1"]:
-            raise ValueError("target is an ASN.1 entry, not an XML MUM")
         if self.m.extract(name) == data:
             return  # identical: leave the original tree and offsets alone
-        tree = self.make_tree(data)
+        if self.m.entry_sections[es]["asn1"]:
+            tree = self.make_asn1_tree(data)
+        else:
+            tree = self.make_tree(data)
         off = len(self.trees[es])
         self.trees[es] += tree
         table = self.tables[es]
@@ -217,8 +240,12 @@ class Builder:
         name = name.encode("utf-8") if isinstance(name, str) else name
         if name in self.entry_by_name:
             raise KeyError("already exists: %s" % name.decode("utf-8", "replace"))
-        es = 0
-        tree = self.make_tree(data)
+        if name.lower().endswith(b".cat"):
+            es = self._asn1_section()
+            tree = self.make_asn1_tree(data)
+        else:
+            es = 0
+            tree = self.make_tree(data)
         off = len(self.trees[es])
         self.trees[es] += tree
         eid = self.add_name(name)
@@ -363,9 +390,13 @@ def extract_all(m, out_dir, mum_only=False, name_filter=None, jobs=None):
 
 def pack_from_dir(m, b, src_dir, sync=False):
     src = Path(src_dir)
-    files = [p for p in src.glob("*.mum") if p.is_file()]
+    allowed = (".mum", ".cat", ".manifest", ".xml")
+    files = [p for p in src.iterdir()
+             if p.is_file() and p.suffix.lower() in allowed]
     seen = set()
     unchanged = changed = added = 0
+    changed_ext = Counter()
+    added_ext = Counter()
     for p in files:
         name = p.name.encode("utf-8")
         seen.add(name)
@@ -376,22 +407,35 @@ def pack_from_dir(m, b, src_dir, sync=False):
                 continue
             b.replace(name, data)
             changed += 1
+            changed_ext[p.suffix.lower()] += 1
         else:
             b.add(name, data)
             added += 1
+            added_ext[p.suffix.lower()] += 1
+    # Only mirror all extensions when the directory is a full extraction.
+    sync_all = any(p.suffix.lower() in (".cat", ".manifest", ".xml") for p in files)
     deleted = 0
+    deleted_ext = Counter()
     if sync:
         for rec, name in m.names:
-            if not name.lower().endswith(b".mum"):
-                continue
             if name in seen:
                 continue
             if m.entry_for_name(name) is None:
                 continue
+            if not sync_all and not name.lower().endswith(b".mum"):
+                continue
             b.delete(name)
             deleted += 1
+            text = name.decode("utf-8", "replace")
+            deleted_ext[Path(text).suffix.lower()] += 1
     print("dir", "unchanged", unchanged, "changed", changed,
           "added", added, "deleted", deleted)
+    if changed_ext:
+        print("changed by type:", dict(changed_ext))
+    if added_ext:
+        print("added by type:", dict(added_ext))
+    if deleted_ext:
+        print("deleted by type:", dict(deleted_ext))
 
 
 def find_wimlib():
